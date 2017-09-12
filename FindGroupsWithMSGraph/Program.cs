@@ -3,6 +3,7 @@ using Microsoft.Identity.Client;
 using System;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace FindGroupsWithMSGraph
 {
@@ -29,7 +30,29 @@ namespace FindGroupsWithMSGraph
             GraphServiceClient graph = new GraphServiceClient(new DelegateAuthenticationProvider(
              (requestMessage) =>
              {
-                 AuthenticationResult result = app.AcquireTokenAsync(scopes).Result;
+                 AuthenticationResult result = null;
+                 var u = app.Users.FirstOrDefault();
+
+                 // If a user has already signed-in, we try first to acquire the token silently, and then if this fails
+                 // we try to acquire it with a user interaction.
+                 if (u != null)
+                 {
+                     try
+                     {
+                         result = app.AcquireTokenSilentAsync(scopes, app.Users.FirstOrDefault()).Result;
+                     }
+                     catch (MsalClientException ex)
+                     {
+                         if (ex.ErrorCode == "interaction_required")
+                         {
+                             result = app.AcquireTokenAsync(scopes).Result;
+                         }
+                     }
+                 }
+                 else
+                 {
+                     result = app.AcquireTokenAsync(scopes).Result;
+                 }
                  requestMessage.Headers.Authorization = new AuthenticationHeaderValue("bearer", result.AccessToken);
                  return Task.FromResult(0);
              }));
@@ -38,7 +61,10 @@ namespace FindGroupsWithMSGraph
             DisplayGroupIdsForGroupTheUserIsAMemberOf(graph).Wait();
 
             // Display all the groups in the organization of the signed-in user
-            DisplayGroupIdsForAllGroupsInMyOrg(graph).Wait() ;
+            DisplayGroupIdsForAllGroupsInMyOrg(graph).Wait();
+
+            // Display the group Ids for all the groups for a give user (here the signed-in user again)
+            DisplayGroupIdsForUser(graph, graph.Me.Request().GetAsync().Result.UserPrincipalName).Wait();
         }
 
         /// <summary>
@@ -66,7 +92,6 @@ namespace FindGroupsWithMSGraph
         /// <param name="graph">Graph</param>
         private static async Task DisplayGroupIdsForGroupTheUserIsAMemberOf(IGraphServiceClient graph)
         {
-            // Group to which the user signing-in in the App belongs
             var myGroupsRequest = graph.Me.GetMemberGroups(false).Request();
             while (myGroupsRequest != null)
             {
@@ -76,6 +101,33 @@ namespace FindGroupsWithMSGraph
                     Console.WriteLine(groupId);
                 }
                 myGroupsRequest = myGroups.NextPageRequest;
+            }
+        }
+
+        /// <summary>
+        /// Displays on the standard output all the groups in the organization of the signed-in user
+        /// </summary>
+        /// <param name="graph">Graph</param>
+        private static async Task DisplayGroupIdsForUser(IGraphServiceClient graph, string userPrincipalName)
+        {
+            var usersRequest = graph.Users.Request().Filter($"userPrincipalName eq '{userPrincipalName}'").Expand("MemberOf");
+            while(usersRequest != null)
+            {
+                var usersPage = await usersRequest.GetAsync();
+                if (usersPage.Any())
+                {
+                    User user = usersPage.FirstOrDefault();
+                    var groupsPage = user.MemberOf;
+                    foreach(var group in groupsPage)
+                    {
+                        Console.WriteLine(group.Id);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"User {userPrincipalName} not found in directory");
+                }
+                usersRequest = usersPage.NextPageRequest;
             }
         }
     }
