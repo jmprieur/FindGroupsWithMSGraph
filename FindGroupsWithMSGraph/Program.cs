@@ -110,24 +110,15 @@ namespace FindGroupsWithMSGraph
         /// <param name="graph">Graph</param>
         private static async Task DisplayGroupIdsForUser(IGraphServiceClient graph, string userPrincipalName)
         {
-            var usersRequest = graph.Users.Request().Filter($"userPrincipalName eq '{userPrincipalName}'").Expand("MemberOf");
-            while(usersRequest != null)
+            var allUserGroupRequest = graph.Users[userPrincipalName].MemberOf.Request();
+            while (allUserGroupRequest != null)
             {
-                var usersPage = await usersRequest.GetAsync();
-                if (usersPage.Any())
+                var groupsPage = await allUserGroupRequest.GetAsync();
+                foreach(var group in groupsPage)
                 {
-                    User user = usersPage.FirstOrDefault();
-                    var groupsPage = user.MemberOf;
-                    foreach(var group in groupsPage)
-                    {
-                        Console.WriteLine(group.Id);
-                    }
+                    Console.WriteLine(group.Id);
                 }
-                else
-                {
-                    Console.WriteLine($"User {userPrincipalName} not found in directory");
-                }
-                usersRequest = usersPage.NextPageRequest;
+                allUserGroupRequest = groupsPage.NextPageRequest;
             }
         }
     }
